@@ -271,21 +271,36 @@ func (e *Enforcer) ClearPolicy() {
 
 // LoadPolicy reloads the policy from file/database.
 func (e *Enforcer) LoadPolicy() error {
-	e.model.ClearPolicy()
-	if err := e.adapter.LoadPolicy(e.model); err != nil && err.Error() != "invalid file path, file path cannot be empty" {
+	needToRebuild := false
+	oldModel := e.model
+	e.model = oldModel.Copy()
+	e.ClearPolicy()
+
+	var err error
+	defer func() {
+		if err != nil {
+			e.model = oldModel
+			if e.autoBuildRoleLinks && needToRebuild {
+				_ = e.BuildRoleLinks()
+			}
+		}
+	}()
+
+	if err = e.adapter.LoadPolicy(e.model); err != nil && err.Error() != "invalid file path, file path cannot be empty" {
 		return err
 	}
 
-	if err := e.model.SortPoliciesByPriority(); err != nil {
+	if err = e.model.SortPoliciesBySubjectHierarchy(); err != nil {
 		return err
 	}
 
-	if err := e.clearRmMap(); err != nil {
+	if err = e.model.SortPoliciesByPriority(); err != nil {
 		return err
 	}
 
 	if e.autoBuildRoleLinks {
-		err := e.BuildRoleLinks()
+		needToRebuild = true
+		err = e.BuildRoleLinks()
 		if err != nil {
 			return err
 		}
@@ -371,15 +386,6 @@ func (e *Enforcer) initRmMap() {
 			e.rmMap[ptype] = defaultrolemanager.NewRoleManager(10)
 		}
 	}
-}
-
-func (e *Enforcer) clearRmMap() error {
-	for ptype := range e.model["g"] {
-		if err := e.rmMap[ptype].Clear(); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // EnableEnforce changes the enforcing state of Casbin, when Casbin is disabled, all access will be allowed by the Enforce() function.

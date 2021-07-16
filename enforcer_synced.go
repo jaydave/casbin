@@ -53,10 +53,10 @@ func (e *SyncedEnforcer) IsAutoLoadingRunning() bool {
 // StartAutoLoadPolicy starts a go routine that will every specified duration call LoadPolicy
 func (e *SyncedEnforcer) StartAutoLoadPolicy(d time.Duration) {
 	// Don't start another goroutine if there is already one running
-	if e.IsAutoLoadingRunning() {
+	if !atomic.CompareAndSwapInt32(&e.autoLoadRunning, 0, 1) {
 		return
 	}
-	atomic.StoreInt32(&(e.autoLoadRunning), int32(1))
+
 	ticker := time.NewTicker(d)
 	go func() {
 		defer func() {
@@ -146,6 +146,27 @@ func (e *SyncedEnforcer) Enforce(rvals ...interface{}) (bool, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.Enforce(rvals...)
+}
+
+// EnforceWithMatcher use a custom matcher to decides whether a "subject" can access a "object" with the operation "action", input parameters are usually: (matcher, sub, obj, act), use model matcher by default when matcher is "".
+func (e *SyncedEnforcer) EnforceWithMatcher(matcher string, rvals ...interface{}) (bool, error) {
+	e.m.RLock()
+	defer e.m.RUnlock()
+	return e.Enforcer.EnforceWithMatcher(matcher, rvals...)
+}
+
+// EnforceEx explain enforcement by informing matched rules
+func (e *SyncedEnforcer) EnforceEx(rvals ...interface{}) (bool, []string, error) {
+	e.m.RLock()
+	defer e.m.RUnlock()
+	return e.Enforcer.EnforceEx(rvals...)
+}
+
+// EnforceExWithMatcher use a custom matcher and explain enforcement by informing matched rules
+func (e *SyncedEnforcer) EnforceExWithMatcher(matcher string, rvals ...interface{}) (bool, []string, error) {
+	e.m.RLock()
+	defer e.m.RUnlock()
+	return e.Enforcer.EnforceExWithMatcher(matcher, rvals...)
 }
 
 // BatchEnforce enforce in batches

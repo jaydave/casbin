@@ -15,8 +15,6 @@
 package casbin
 
 import (
-	"fmt"
-
 	"github.com/casbin/casbin/v2/errors"
 	"github.com/casbin/casbin/v2/util"
 )
@@ -148,10 +146,11 @@ func (e *Enforcer) GetPermissionsForUser(user string, domain ...string) [][]stri
 	for ptype, assertion := range e.model["p"] {
 		args := make([]string, len(assertion.Tokens))
 		args[0] = user
-		for i, token := range assertion.Tokens {
-			if token == fmt.Sprintf("%s_dom", ptype) {
-				args[i] = domain[0]
-				break
+
+		if len(domain) > 0 {
+			index := e.getDomainIndex(ptype)
+			if index < len(assertion.Tokens) {
+				args[index] = domain[0]
 			}
 		}
 		perm := e.GetFilteredPolicy(0, args...)
@@ -188,6 +187,37 @@ func (e *Enforcer) GetImplicitRolesForUser(name string, domain ...string) ([]str
 		for _, rm := range e.rmMap {
 			roles, err := rm.GetRoles(name, domain...)
 			if err != nil {
+				return nil, err
+			}
+			for _, r := range roles {
+				if _, ok := roleSet[r]; !ok {
+					res = append(res, r)
+					q = append(q, r)
+					roleSet[r] = true
+				}
+			}
+		}
+	}
+
+	return res, nil
+}
+
+// GetImplicitUsersForRole gets implicit users for a role.
+func (e *Enforcer) GetImplicitUsersForRole(name string, domain ...string) ([]string, error) {
+	res := []string{}
+	roleSet := make(map[string]bool)
+	roleSet[name] = true
+
+	q := make([]string, 0)
+	q = append(q, name)
+
+	for len(q) > 0 {
+		name := q[0]
+		q = q[1:]
+
+		for _, rm := range e.rmMap {
+			roles, err := rm.GetUsers(name, domain...)
+			if err != nil && err.Error() != "error: name does not exist" {
 				return nil, err
 			}
 			for _, r := range roles {
@@ -276,4 +306,43 @@ func (e *Enforcer) GetDomainsForUser(user string) ([]string, error) {
 		domains = append(domains, domain...)
 	}
 	return domains, nil
+}
+
+// GetImplicitResourcesForUser returns all policies that user obtaining in domain
+func (e *Enforcer) GetImplicitResourcesForUser(user string, domain ...string) ([][]string, error) {
+	permissions, err := e.GetImplicitPermissionsForUser(user, domain...)
+	if err != nil {
+		return nil, err
+	}
+	res := make([][]string, 0)
+	for _, permission := range permissions {
+		if permission[0] == user {
+			res = append(res, permission)
+			continue
+		}
+		resLocal := [][]string{{user}}
+		tokensLength := len(permission)
+		t := make([][]string, 1, tokensLength)
+		for _, token := range permission[1:] {
+			tokens, err := e.GetImplicitUsersForRole(token, domain...)
+			if err != nil {
+				return nil, err
+			}
+			tokens = append(tokens, token)
+			t = append(t, tokens)
+		}
+		for i := 1; i < tokensLength; i++ {
+			n := make([][]string, 0)
+			for _, tokens := range t[i] {
+				for _, policy := range resLocal {
+					t := append([]string(nil), policy...)
+					t = append(t, tokens)
+					n = append(n, t)
+				}
+			}
+			resLocal = n
+		}
+		res = append(res, resLocal...)
+	}
+	return res, nil
 }
