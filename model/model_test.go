@@ -1,25 +1,30 @@
-// Copyright 2019 The casbin Authors. All Rights Reserved.
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+//   http://www.apache.org/licenses/LICENSE-2.0
 //
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
 
 package model
 
 import (
-	"github.com/casbin/casbin/v2/config"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/casbin/casbin/v3/config"
+	"github.com/casbin/casbin/v3/constant"
 )
 
 var (
@@ -61,11 +66,11 @@ func TestNewModelFromFile(t *testing.T) {
 }
 
 func TestNewModelFromString(t *testing.T) {
-	modelBytes, _ := ioutil.ReadFile(basicExample)
+	modelBytes, _ := os.ReadFile(basicExample)
 	modelString := string(modelBytes)
 	m, err := NewModelFromString(modelString)
 	if err != nil {
-		t.Errorf("model faild to load from string: %s", err)
+		t.Errorf("model failed to load from string: %s", err)
 	}
 	if m == nil {
 		t.Error("model should not be nil")
@@ -120,5 +125,40 @@ func TestModel_AddDef(t *testing.T) {
 	ok = m.AddDef(s, s, "")
 	if ok {
 		t.Errorf("empty assertion value should not be added")
+	}
+}
+
+func TestModelToTest(t *testing.T) {
+	testModelToText(t, "r.sub == p.sub && r.obj == p.obj && r_func(r.act, p.act) && testr_func(r.act, p.act)", "r_sub == p_sub && r_obj == p_obj && r_func(r_act, p_act) && testr_func(r_act, p_act)")
+	testModelToText(t, "r.sub == p.sub && r.obj == p.obj && p_func(r.act, p.act) && testp_func(r.act, p.act)", "r_sub == p_sub && r_obj == p_obj && p_func(r_act, p_act) && testp_func(r_act, p_act)")
+}
+
+func testModelToText(t *testing.T, mData, mExpected string) {
+	m := NewModel()
+	data := map[string]string{
+		"r": "sub, obj, act",
+		"p": "sub, obj, act",
+		"e": "some(where (p.eft == allow))",
+		"m": mData,
+	}
+	expected := map[string]string{
+		"r": "sub, obj, act",
+		"p": "sub, obj, act",
+		"e": constant.AllowOverrideEffect,
+		"m": mExpected,
+	}
+	addData := func(ptype string) {
+		m.AddDef(ptype, ptype, data[ptype])
+	}
+	for ptype := range data {
+		addData(ptype)
+	}
+	newM := NewModel()
+	print(m.ToText())
+	_ = newM.LoadModelFromText(m.ToText())
+	for ptype := range data {
+		if newM[ptype][ptype].Value != expected[ptype] {
+			t.Errorf("\"%s\" assertion value changed, current value: %s, it should be: %s", ptype, newM[ptype][ptype].Value, expected[ptype])
+		}
 	}
 }

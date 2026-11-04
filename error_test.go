@@ -1,23 +1,28 @@
-// Copyright 2017 The casbin Authors. All Rights Reserved.
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+//   http://www.apache.org/licenses/LICENSE-2.0
 //
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
 
 package casbin
 
 import (
+	"strings"
 	"testing"
 
-	fileadapter "github.com/casbin/casbin/v2/persist/file-adapter"
+	fileadapter "github.com/casbin/casbin/v3/persist/file-adapter"
+	"github.com/casbin/casbin/v3/util"
 )
 
 func TestPathError(t *testing.T) {
@@ -58,7 +63,7 @@ func TestModelError(t *testing.T) {
 	}
 }
 
-//func TestPolicyError(t *testing.T) {
+// func TestPolicyError(t *testing.T) {
 //	_, err := NewEnforcer("examples/basic_model.conf", "examples/error/error_policy.csv")
 //	if err == nil {
 //		t.Errorf("Should be error here.")
@@ -281,5 +286,72 @@ func TestMockAdapterErrors(t *testing.T) {
 	} else {
 		t.Log("Test on error: ")
 		t.Log(err10.Error())
+	}
+}
+
+func TestInvalidPatternInPolicy(t *testing.T) {
+	e, err := NewEnforcer("examples/keymatch_model.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.AddPolicy("alice", "/alice_data/*", "(GET"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = e.Enforce("alice", "/alice_data/resource1", "GET")
+	if err == nil || strings.HasPrefix(err.Error(), "panic:") ||
+		!strings.Contains(err.Error(), "regexMatch: error parsing regexp: missing closing ): `(GET`") {
+		t.Errorf("Enforce returns %v, supposed to be a regexMatch parse error", err)
+	}
+
+	e, err = NewEnforcer("examples/rbac_with_pattern_model.conf", "examples/rbac_with_pattern_policy.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.AddNamedMatchingFunc("g2", "matchingFunc", util.KeyMatch2)
+	if _, err = e.AddNamedGroupingPolicy("g2", "/book/(1", "book_group"); err != nil {
+		t.Fatal(err)
+	}
+
+	testEnforce(t, e, "alice", "/book/1", "GET", true)
+	testEnforce(t, e, "alice", "/book/(1", "GET", true)
+	if roles, err := e.GetNamedImplicitRolesForUser("g2", "/book/(1"); err != nil || len(roles) != 1 {
+		t.Errorf("GetNamedImplicitRolesForUser returns %v %v, supposed to be [book_group]", roles, err)
+	}
+}
+
+func TestInvalidIPInRequest(t *testing.T) {
+	e, err := NewEnforcer("examples/ipmatch_model.conf", "examples/ipmatch_policy.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = e.Enforce("192.168.2.abc", "data1", "read")
+	if err == nil || strings.HasPrefix(err.Error(), "panic:") ||
+		!strings.Contains(err.Error(), `ipMatch: "192.168.2.abc" is not an IP address`) {
+		t.Errorf("Enforce returns %v, supposed to be an ipMatch argument error", err)
+	}
+	testEnforce(t, e, "192.168.2.1", "data1", "read", true)
+}
+
+func TestPatternWithCaptureGroupInPolicy(t *testing.T) {
+	e, err := NewEnforcer("examples/rbac_with_pattern_model.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.AddNamedMatchingFunc("g2", "matchingFunc", util.KeyMatch4)
+	if _, err = e.AddPolicy("alice", "book_group", "GET"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.AddNamedGroupingPolicy("g2", "/(book|pen)/{id}/copy/{id}", "book_group"); err != nil {
+		t.Fatal(err)
+	}
+
+	testEnforce(t, e, "alice", "/book/1/copy/1", "GET", true)
+	testEnforce(t, e, "alice", "/pen/1/copy/1", "GET", true)
+	testEnforce(t, e, "alice", "/book/1/copy/2", "GET", false)
+	testEnforce(t, e, "alice", "/cup/1/copy/1", "GET", false)
+	if roles, err := e.GetNamedImplicitRolesForUser("g2", "/book/1/copy/1"); err != nil || len(roles) != 1 {
+		t.Errorf("GetNamedImplicitRolesForUser returns %v %v, supposed to be [book_group]", roles, err)
 	}
 }
